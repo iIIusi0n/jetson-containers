@@ -1,5 +1,5 @@
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/jetson-containers.git
+git clone https://github.com/iIIusi0n/jetson-containers.git
 cd jetson-containers
 git remote add upstream https://github.com/dusty-nv/jetson-containers.git
 python3 -m venv .venv
