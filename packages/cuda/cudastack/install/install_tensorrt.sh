@@ -2,6 +2,8 @@
 # Install TensorRT from either .deb or .tar.gz
 set -eux
 
+source /tmp/cuda-stack/install/apt_update_retry.sh
+
 echo "Installing TensorRT ${TENSORRT_VERSION}..."
 
 # If no URL provided, skip
@@ -28,7 +30,7 @@ if [ "${TENSORRT_URL##*.}" = "deb" ]; then
     fi
 
     # Update and install TensorRT packages
-    apt-get update
+    apt_update_retry
 
     # Install specified packages or defaults
     PACKAGES="${TENSORRT_PACKAGES:-tensorrt tensorrt-libs python3-libnvinfer-dev}"
@@ -124,4 +126,3 @@ else
 fi
 rm -rf /tmp/*.deb
 echo "TensorRT ${TENSORRT_VERSION} installation complete"
-

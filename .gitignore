@@ -9,6 +9,7 @@ logs
 test/data
 runner
 venv
+.venv
 .env
 *.minus-github-api
 .DS_Store

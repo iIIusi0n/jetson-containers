@@ -2,6 +2,8 @@
 # Install cuDNN
 set -eux
 
+source /tmp/cuda-stack/install/apt_update_retry.sh
+
 echo "Installing cuDNN ${CUDNN_VERSION}..."
 
 cd ${TMP:-/tmp}
@@ -18,7 +20,7 @@ cp /var/cudnn-*-repo-*-*/cudnn-local-*-keyring.gpg /usr/share/keyrings/ 2>/dev/n
 
 
 # Update and install cuDNN packages
-apt-get update
+apt_update_retry
 apt-get install -y --no-install-recommends ${CUDNN_PACKAGES}
 
 # Cleanup

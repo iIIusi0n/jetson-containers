@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -eux
 
+source /tmp/cuda-stack/install/apt_update_retry.sh
+
 echo "Installing NVIDIA NCCL $NCCL_VERSION"
 
 if [ "$CUDA_ARCH" = "aarch64" ]; then
@@ -22,7 +24,7 @@ wget $WGET_FLAGS $MULTIARCH_URL/$DEB
 if [ "$CUDA_ARCH" != "tegra-aarch64" ]; then
     dpkg -i $DEB
     cp /var/nccl-local-repo-${DISTRO}-${NCCL_VERSION}-cuda13.0/nccl-local-*-keyring.gpg /usr/share/keyrings/
-    apt-get update
+    apt_update_retry
     dpkg -i $DEB
     apt-get -y install libnccl2 libnccl-dev
 else
@@ -30,7 +32,7 @@ cd "$TMP"
 wget $WGET_FLAGS "$MULTIARCH_URL/$DEB"
 dpkg -i "$DEB"
 cp /var/nccl-local-repo-${DISTRO}-"$NCCL_VERSION"-cuda13.0/nccl-local-*-keyring.gpg /usr/share/keyrings/
-apt-get update
+apt_update_retry
 apt-get -y install libnccl2 libnccl-dev
 fi
 rm -rf /tmp/*.deb

@@ -1,10 +1,30 @@
 #!/usr/bin/env bash
 set -ex
 
+apt_update_retry() {
+  local attempt=1
+  local max_attempts=5
+  local delay=15
+
+  while (( attempt <= max_attempts )); do
+    if apt-get update; then
+      return 0
+    fi
+
+    if (( attempt == max_attempts )); then
+      return 1
+    fi
+
+    echo "apt-get update failed (attempt ${attempt}/${max_attempts}), retrying in ${delay}s..."
+    sleep "${delay}"
+    attempt=$((attempt + 1))
+  done
+}
+
 echo "##### 🏢 \$PYTORCH_OFFICIAL_WHL is $PYTORCH_OFFICIAL_WHL #####"
 
 # install prerequisites
-apt-get update
+apt_update_retry
 if [[ "$IS_SBSA" == "True" ]]; then
   echo "SBSA system detected - using NVPL BLAS, skipping OpenBLAS"
   apt-get install -y --no-install-recommends \
@@ -29,7 +49,7 @@ UBUNTU_VERSION=$(grep VERSION_ID /etc/os-release | cut -d '"' -f 2)
 if [[ "$UBUNTU_VERSION" == "22.04" ]]; then
   echo "🟢 Ubuntu 22.04 detected — installing GCC 13 for GLIBCXX_3.4.32"
 
-  apt-get update
+  apt_update_retry
   apt-get install -y --no-install-recommends \
     software-properties-common \
     curl \
@@ -37,7 +57,7 @@ if [[ "$UBUNTU_VERSION" == "22.04" ]]; then
     ca-certificates
 
   add-apt-repository ppa:ubuntu-toolchain-r/test -y
-  apt-get update
+  apt_update_retry
   apt install -y g++-13 libstdc++-13-dev libstdc++6
 
   STDCPP_SO=$(find /usr/lib/aarch64-linux-gnu -name 'libstdc++.so.6.0.*' | sort -V | tail -n1)
@@ -67,11 +87,22 @@ else
   uv pip install --prerelease=allow "torch>=${PYTORCH_BUILD_VERSION}.dev,<=${PYTORCH_BUILD_VERSION}"
 fi
 
-# make sure it loads
-python3 -c 'import torch; \
-    print(f"PyTorch version: {torch.__version__}"); \
-    print(f"CUDA device #  : {torch.cuda.device_count()}"); \
-    print(f"CUDA version   : {torch.version.cuda}"); \
-    print(f"cuDNN version  : {torch.backends.cudnn.version()}");'
+if [ "${JETSON_CROSS_BUILD:-0}" = "1" ]; then
+  echo "Skipping live CUDA runtime probe during cross-build (${JETSON_TARGET_PLATFORM:-unknown})"
+  uv pip show torch
+  python3 - <<'PY'
+from importlib import metadata
+
+print(f"PyTorch version: {metadata.version('torch')}")
+PY
+else
+  # make sure it loads on native builds
+  python3 -c 'import torch; \
+      print(f"PyTorch version: {torch.__version__}"); \
+      print(f"CUDA device #  : {torch.cuda.device_count()}"); \
+      print(f"CUDA version   : {torch.version.cuda}"); \
+      print(f"cuDNN version  : {torch.backends.cudnn.version()}");'
+fi
+
 # PyTorch C++ extensions frequently use ninja parallel builds
 uv pip install scikit-build ninja

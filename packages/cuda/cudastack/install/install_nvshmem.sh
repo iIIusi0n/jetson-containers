@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -exu
 
+source /tmp/cuda-stack/install/apt_update_retry.sh
+
 echo "Detected architecture: ${CUDA_ARCH}"
 
-if [ "$CUDA_ARCH" = "aarch64" ] || [ "$CUDA_ARCH" = "tegra-aarch64" ]; then
+if [ "$CUDA_ARCH" = "tegra-aarch64" ]; then
+  echo "NVSHMEM ${NVSHMEM_VERSION} is not currently published for Tegra; skipping"
+  exit 0
+elif [ "$CUDA_ARCH" = "aarch64" ]; then
   wget $WGET_FLAGS \
     "https://developer.download.nvidia.com/compute/nvshmem/${NVSHMEM_VERSION}/local_installers/nvshmem-local-repo-${DISTRO}-${NVSHMEM_VERSION}_${NVSHMEM_VERSION}-1_arm64.deb"
   dpkg -i nvshmem-local-*.deb
   cp /var/nvshmem-local-*/nvshmem-*-keyring.gpg /usr/share/keyrings/
-  apt-get update
+  apt_update_retry
   apt-get -y install nvshmem-cuda-${CUDA_VERSION_MAJOR}
 
 # elif [[ "$CUDA_ARCH" == "tegra-aarch64" ]]; then
@@ -19,7 +24,7 @@ else
 
   dpkg -i nvshmem-local-*.deb
   cp /var/nvshmem-local-*/nvshmem-*-keyring.gpg /usr/share/keyrings/
-  apt-get update
+  apt_update_retry
   apt-get -y install nvshmem-cuda-${CUDA_VERSION_MAJOR}
 fi
 

@@ -2,6 +2,8 @@
 set -eu
 set -x
 
+source /tmp/cuda-stack/install/apt_update_retry.sh
+
 echo "Detected architecture: ${CUDA_ARCH}"
 
 if [ "$CUDA_ARCH" = "aarch64" ]; then
@@ -16,7 +18,7 @@ fi
 wget ${WGET_FLAGS:-} "https://developer.download.nvidia.com/compute/cutensor/${CUTENSOR_VERSION}/local_installers/${deb}"
 dpkg -i "$deb"
 cp /var/cutensor-local-repo-*-*/cutensor-*-keyring.gpg /usr/share/keyrings/
-apt-get update
+apt_update_retry
 apt-get -y install "cutensor-cuda-${CUDA_VERSION_MAJOR}"
 rm -rf /var/lib/apt/lists/*
 apt-get clean

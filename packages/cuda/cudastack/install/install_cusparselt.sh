@@ -2,6 +2,8 @@
 
 set -exu
 
+source /tmp/cuda-stack/install/apt_update_retry.sh
+
 echo "Detected architecture: ${CUDA_ARCH}"
 echo "IS_SBSA: ${IS_SBSA}"
 
@@ -20,7 +22,7 @@ if [ "$CUDA_ARCH" = "aarch64" ] || [ "$IS_SBSA" = "True" ]; then
   cp /var/cusparselt-local-repo-${DISTRO}-${CUSPARSELT_VERSION}/cusparselt-local-*-keyring.gpg /usr/share/keyrings/
 
   # 3) Update APT
-  apt-get update
+  apt_update_retry
 
   # 4) Pick CUDA major automatically (expects nvcc in PATH)
   CUDA_MAJOR=$(nvcc --version | awk -F'release ' '/release/{print $2}' | cut -d. -f1)
@@ -75,6 +77,13 @@ elif [ "$CUDA_ARCH" = "tegra-aarch64" ]; then
   # Detect CUDA major (fallback to 12 for JP6.x)
   CUDA_MAJOR="$(nvcc --version 2>/dev/null | sed -n 's/.*release \([0-9][0-9]*\).*/\1/p')"
   CUDA_MAJOR="${CUDA_MAJOR:-12}"
+
+  # NVIDIA currently publishes Tegra tarballs through 0.8.1.
+  # Fall back from unpublished 0.9.x requests to the latest known-good release.
+  if [[ "${CUSPARSELT_VERSION}" == 0.9.* ]]; then
+    echo "cuSPARSELt ${CUSPARSELT_VERSION} is not published for Tegra; falling back to 0.8.1"
+    CUSPARSELT_VERSION="0.8.1"
+  fi
 
   # Determine the patch suffix based on CUSPARSELT_VERSION
   # Pattern: 0.8.1 -> .1, 0.8.0 -> .4, 0.7.1 -> .0, 0.7.0 -> .0
@@ -151,7 +160,7 @@ else
 
   dpkg -i cusparselt-local-*.deb
   cp /var/cusparselt-local-*/cusparselt-*-keyring.gpg /usr/share/keyrings/
-  apt-get update
+  apt_update_retry
   apt-get -y install libcusparselt0 libcusparselt-dev
 fi
 

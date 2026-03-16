@@ -105,11 +105,11 @@ def cuda_stack_args():
 
         # Additional libraries
         'CUDSS_VERSION': '0.7.1',
-        'CUSPARSELT_VERSION': '0.9.0',
+        'CUSPARSELT_VERSION': '0.8.1',
         'CUTENSOR_VERSION': '2.6.0',
         'GDRCOPY_VERSION': '2.5.1',
         'NVPL_VERSION': '25.11',
-        'NVSHMEM_VERSION': '3.6.0',
+        'NVSHMEM_VERSION': '3.5.21',
 
         # Architecture and CUDA info
         'CUDA_ARCH': CUDA_ARCH,
@@ -153,7 +153,7 @@ def cuda_stack(name, with_tensorrt=False, minimal=False, requires=None):
     build_args['WITH_CUTENSOR'] = '0' if minimal else '1'
     build_args['WITH_GDRCOPY'] = '0' if minimal else '1'
     build_args['WITH_NVPL'] = '0' if minimal else ('1' if IS_SBSA else '0')
-    build_args['WITH_NVSHMEM'] = '0' if minimal else '1'
+    build_args['WITH_NVSHMEM'] = '0' if (minimal or IS_TEGRA) else '1'
 
     # Enable distributed (experimental) NCCL for Jetson if explicitly enabled via environment variable
     if IS_TEGRA and os.environ.get('ENABLE_DISTRIBUTED_JETSON_NCCL', '0') == '1':

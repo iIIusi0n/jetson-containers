@@ -44,6 +44,7 @@ parser.add_argument('--base', type=str, default='', help="the base container to 
 parser.add_argument('--multiple', action='store_true', help="the specified packages should be built independently as opposed to chained together")
 parser.add_argument('--build-flags', type=str, default='', help="extra flags to pass to 'docker build' commands")
 parser.add_argument('--build-args', type=str, default='', help="container build arguments (--build-arg) as a string of comma separated key:value pairs")
+parser.add_argument('--platform', type=str, default='', help="target platform for buildx builds (for example linux/arm64)")
 parser.add_argument('--use-proxy', action='store_true', help="use the host's proxy envvars for the container build")
 parser.add_argument('--package-dirs', type=str, default='', help="additional package search directories (comma or colon-separated)")
 
@@ -105,6 +106,10 @@ if args.use_proxy:
     for var in proxy_vars:
         if var in os.environ:
             args.build_args[var] = os.environ[var]
+
+if args.platform:
+    platform_flag = f"--platform={args.platform}"
+    args.build_flags = f"{args.build_flags} {platform_flag}".strip()
 
 # add package directories
 if args.package_dirs:

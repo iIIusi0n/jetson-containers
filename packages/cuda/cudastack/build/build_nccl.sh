@@ -1,6 +1,8 @@
 #!/bin/bash
 set -eux
 
+source /tmp/cuda-stack/install/apt_update_retry.sh
+
 # The build stage is only for tegra-aarch64
 if [ "$CUDA_ARCH" != "tegra-aarch64" ]; then
     echo "build_nccl.sh is only for tegra-aarch64, skipping (current: $CUDA_ARCH)"
@@ -9,7 +11,7 @@ fi
 
 echo "Building NVIDIA NCCL $NCCL_VERSION (NCCL)"
 
-apt-get update
+apt_update_retry
 apt-get install -y --no-install-recommends build-essential devscripts debhelper fakeroot
 
 git clone --branch=v${NCCL_VERSION}-1 https://github.com/NVIDIA/nccl

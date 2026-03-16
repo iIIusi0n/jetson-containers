@@ -2,6 +2,26 @@
 # Python installer via uv
 set -euxo pipefail
 
+apt_update_retry() {
+  local attempt=1
+  local max_attempts=5
+  local delay=15
+
+  while (( attempt <= max_attempts )); do
+    if apt-get update; then
+      return 0
+    fi
+
+    if (( attempt == max_attempts )); then
+      return 1
+    fi
+
+    echo "apt-get update failed (attempt ${attempt}/${max_attempts}), retrying in ${delay}s..."
+    sleep "${delay}"
+    attempt=$((attempt + 1))
+  done
+}
+
 # Expected variables:
 #   PYTHON_VERSION (e.g., 3.12 or 3.14)
 #   PYTHON_FREE_THREADING (0 or 1, default 0)
@@ -23,7 +43,7 @@ else
   echo "Installing standard Python ${PYTHON_INSTALL_VERSION}"
 fi
 
-apt-get update
+apt_update_retry
 apt-get install -y --no-install-recommends \
   curl ca-certificates
 

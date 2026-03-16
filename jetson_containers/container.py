@@ -5,10 +5,13 @@ import dockerhub_api
 import fnmatch
 import json
 import os
+import platform
 import pprint
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 from packaging.version import Version
@@ -61,6 +64,91 @@ class BuildTimer:
         """Move to next stage and reset stage timer"""
         self.stage_start = time.time()
         self.current_stage += 1
+
+
+def extract_buildx_platform(build_flags: str='') -> str:
+    """
+    Extract the first --platform value from a build flag string.
+    """
+    if not build_flags:
+        return ''
+
+    try:
+        tokens = shlex.split(build_flags)
+    except ValueError:
+        tokens = build_flags.split()
+
+    for idx, token in enumerate(tokens):
+        if token.startswith('--platform='):
+            return token.split('=', maxsplit=1)[1]
+        if token == '--platform' and idx + 1 < len(tokens):
+            return tokens[idx + 1]
+
+    return ''
+
+
+def host_docker_arch() -> str:
+    """
+    Return the host CPU architecture using Docker-style names.
+    """
+    machine = platform.machine().lower()
+    arch_map = {
+        'x86_64': 'amd64',
+        'amd64': 'amd64',
+        'aarch64': 'arm64',
+        'arm64': 'arm64',
+    }
+    return arch_map.get(machine, machine)
+
+
+def platform_arch(platform_spec: str='') -> str:
+    """
+    Extract the architecture component from a platform spec like linux/arm64.
+    """
+    if not platform_spec:
+        return ''
+
+    normalized = platform_spec.split(',', maxsplit=1)[0].strip()
+    parts = normalized.split('/')
+
+    if len(parts) >= 2:
+        return parts[1]
+
+    return normalized
+
+
+def is_cross_platform_build(platform_spec: str='') -> bool:
+    """
+    Return true when the target platform differs from the host CPU architecture.
+    """
+    target_arch = platform_arch(platform_spec)
+
+    if not target_arch:
+        return False
+
+    return target_arch != host_docker_arch()
+
+
+def get_buildx_driver() -> str:
+    """
+    Return the active buildx driver (docker, docker-container, kubernetes, remote, ...).
+    """
+    try:
+        output = subprocess.check_output(
+            f"{sudo_prefix()}docker buildx inspect",
+            shell=True,
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+    except subprocess.CalledProcessError as error:
+        log_debug(f"docker buildx inspect failed: {error.output}")
+        return ''
+
+    for line in output.splitlines():
+        if line.startswith('Driver:'):
+            return line.split(':', maxsplit=1)[1].strip()
+
+    return ''
 
 def build_container(
         name: str='', packages: list=[], base: str=get_l4t_base(),
@@ -123,6 +211,65 @@ def build_container(
         for package in packages:
             find_package(package)
 
+        # Detect cross-platform builds requested through buildx --platform flag.
+        buildx_platform = extract_buildx_platform(build_flags)
+        host_cross_build = is_cross_platform_build(buildx_platform)
+        use_buildx_requested = (
+            os.environ.get('DOCKER_BUILDKIT', '0') != '0'
+            or (
+                os.environ.get('SCP_UPLOAD_KEY')
+                and os.path.isfile(os.environ.get('SCP_UPLOAD_KEY'))
+            )
+            or bool(buildx_platform)
+        )
+        buildx_driver = get_buildx_driver() if use_buildx_requested else ''
+        use_oci_handoff = False
+        oci_layout_root = ''
+        effective_skip_tests = skip_tests.copy()
+        cross_build_args = {}
+
+        if buildx_platform and host_cross_build and 'all' not in effective_skip_tests:
+            log_warning(
+                f"Target platform '{buildx_platform}' differs from host '{host_docker_arch()}' - "
+                "skipping container tests during cross-build"
+            )
+            effective_skip_tests.append('all')
+            cross_build_args['JETSON_CROSS_BUILD'] = '1'
+            cross_build_args['JETSON_TARGET_PLATFORM'] = buildx_platform
+
+            target_arch = platform_arch(buildx_platform)
+            if target_arch:
+                cross_build_args['JETSON_TARGET_ARCH'] = target_arch
+
+        if buildx_platform and use_buildx_requested and buildx_driver and buildx_driver != 'docker':
+            packages_without_dockerfiles = [
+                package for package in packages
+                if 'dockerfile' not in find_package(package)
+            ]
+
+            if packages_without_dockerfiles:
+                log_warning(
+                    "buildx cross-build OCI handoff requires packages with Dockerfiles; "
+                    f"disabling it for {packages_without_dockerfiles}"
+                )
+            else:
+                use_oci_handoff = True
+                if 'intermediate' not in effective_skip_tests and 'all' not in effective_skip_tests:
+                    log_warning(
+                        "buildx cross-build OCI handoff stores intermediate images outside the local "
+                        "Docker daemon - skipping intermediate package tests"
+                    )
+                    effective_skip_tests.append('intermediate')
+
+                oci_layout_root = tempfile.mkdtemp(
+                    prefix='oci-handoff_',
+                    dir=get_log_dir('build'),
+                )
+                log_info(
+                    f"Using OCI layout handoff for buildx driver '{buildx_driver}' "
+                    f"(platform={buildx_platform}) at: {oci_layout_root}"
+                )
+
         # assign default container repository if needed
         if len(name) == 0:
             name = packages[-1]
@@ -169,6 +316,7 @@ def build_container(
 
         # Initialize build timer
         timer = BuildTimer()
+        base_context = None
 
         # build chain of all packages
         for idx, package in enumerate(packages):
@@ -187,7 +335,7 @@ def build_container(
                 # Use buildx which always uses BuildKit and has better log size limit support
                 # Enable buildx if SSH key is provided (required for secrets) or user prefers it
                 user_buildkit = os.environ.get('DOCKER_BUILDKIT', '0')
-                use_buildx = user_buildkit != '0' or scp_key_provided
+                use_buildx = user_buildkit != '0' or scp_key_provided or bool(buildx_platform)
 
                 # Set BuildKit log size limit (default 500MB, configurable via BUILDKIT_STEP_LOG_MAX_SIZE)
                 # Default Docker BuildKit limit is 2MiB which can clip large build outputs
@@ -198,11 +346,24 @@ def build_container(
                     buildkit_env = f"BUILDKIT_STEP_LOG_MAX_SIZE={buildkit_log_size}"
                     cmd = f"{sudo_prefix()}{buildkit_env} docker buildx build --network=host --shm-size=8g" + _NEWLINE_
                     cmd += f"  --progress=plain" + _NEWLINE_
-                    cmd += f"  --load" + _NEWLINE_  # Load image into local Docker daemon
                 else:
                     # Fallback to regular docker build
                     buildkit_env = f"DOCKER_BUILDKIT=0"
                     cmd = f"{sudo_prefix()}{buildkit_env} docker build --network=host --shm-size=8g" + _NEWLINE_
+
+                stage_oci_layout = ''
+                is_final_stage = idx == len(packages) - 1
+
+                if use_buildx:
+                    if use_oci_handoff and not is_final_stage:
+                        stage_oci_layout = os.path.join(
+                            oci_layout_root,
+                            f"{idx+1:02d}_{container_name.replace('/','_').replace(':','_')}",
+                        )
+                        cmd += f"  --output type=oci,dest={stage_oci_layout},tar=false" + _NEWLINE_
+                    else:
+                        cmd += f"  --load" + _NEWLINE_  # Load image into local Docker daemon
+
                 cmd += f"  --tag {container_name}" + _NEWLINE_
                 if no_github_api:
                     dockerfilepath = os.path.join(pkg['path'], pkg['dockerfile'])
@@ -218,11 +379,26 @@ def build_container(
                 else:
                     cmd += f"  --file {os.path.join(pkg['path'], pkg['dockerfile'])}" + _NEWLINE_
 
-                cmd += f"  --build-arg BASE_IMAGE={base}" + _NEWLINE_
+                base_image = base
+
+                if use_oci_handoff and base_context:
+                    context_name = f"jc_base_{idx}"
+                    cmd += f"  --build-context {context_name}=oci-layout://{base_context}:latest" + _NEWLINE_
+                    base_image = context_name
+
+                cmd += f"  --build-arg BASE_IMAGE={base_image}" + _NEWLINE_
                 cmd += f"  --build-arg NVIDIA_DRIVER_CAPABILITIES=all" + _NEWLINE_
 
                 if 'build_args' in pkg:
                     cmd += ''.join([f"  --build-arg {key}=\"{value}\"" + _NEWLINE_ for key, value in pkg['build_args'].items()])
+
+                if cross_build_args:
+                    for key, value in cross_build_args.items():
+                        key_in_pkg = 'build_args' in pkg and key in pkg['build_args']
+                        key_in_user = build_args and key in build_args
+
+                        if not key_in_pkg and not key_in_user:
+                            cmd += f"  --build-arg {key}={value}" + _NEWLINE_
 
                 if build_args:
                     for key, value in build_args.items():
@@ -270,11 +446,16 @@ def build_container(
                 if not simulate:  # remove the line breaks that were added for readability, and set the shell to bash so we can use $PIPESTATUS
                     status = subprocess.run(cmd.replace(_NEWLINE_, ' '), executable='/bin/bash', shell=True, check=True)
                     print('')
+
+                if use_oci_handoff and stage_oci_layout:
+                    base_context = stage_oci_layout
+                else:
+                    base_context = None
             else:
                 tag_container(base, container_name, simulate)
 
             # run tests on the intermediate container
-            if package not in skip_tests and 'intermediate' not in skip_tests and 'all' not in skip_tests:
+            if package not in effective_skip_tests and 'intermediate' not in effective_skip_tests and 'all' not in effective_skip_tests:
                 if len(test_only) == 0 or package in test_only:
                     status_text = f"[{idx+1}/{len(packages)}] Testing {package} ({container_name})"
                     current_time = datetime.datetime.now().strftime("%H:%M:%S")
@@ -294,7 +475,7 @@ def build_container(
 
         # re-run tests on final container
         for idx, package in enumerate(packages):
-            if package not in skip_tests and 'all' not in skip_tests:
+            if package not in effective_skip_tests and 'all' not in effective_skip_tests:
                 if len(test_only) == 0 or package in test_only:
                     status_text = f"[{idx+1}/{len(packages)}] Testing {package} ({name})"
                     current_time = datetime.datetime.now().strftime("%H:%M:%S")

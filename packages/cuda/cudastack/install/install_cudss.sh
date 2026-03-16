@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -ex
+source /tmp/cuda-stack/install/apt_update_retry.sh
 echo "Detected architecture: ${CUDA_ARCH}"
 if [ "$CUDA_ARCH" = "aarch64" ] || [ "$IS_SBSA" = "True" ]; then
   wget $WGET_FLAGS \
@@ -18,7 +19,7 @@ else
 fi
 dpkg -i cudss-local-*.deb
 cp /var/cudss-local-*/cudss-*-keyring.gpg /usr/share/keyrings/
-apt-get update
+apt_update_retry
 apt-get -y install cudss
 rm -rf /var/lib/apt/lists/*
 apt-get clean

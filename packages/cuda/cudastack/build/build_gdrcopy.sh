@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -eux
 
+source /tmp/cuda-stack/install/apt_update_retry.sh
+
 echo "Installing NVIDIA GDRCopy ${GDRCOPY_VERSION:-unknown} (GDRCopy)"
 
 # Install prerequisites
-apt-get update
+apt_update_retry
 apt-get install -y \
     dkms \
     build-essential \

@@ -1,5 +1,5 @@
 # this is in a different file from config.py so other packages can import it
-from jetson_containers import L4T_VERSION, CUDA_VERSION, SYSTEM_ARM
+from jetson_containers import L4T_VERSION, CUDA_VERSION, SYSTEM_ARM, PYTHON_VERSION
 from packaging.version import Version
 
 import os
@@ -17,8 +17,12 @@ elif SYSTEM_ARM:
     elif L4T_VERSION.major >= 36:
         if CUDA_VERSION >= Version('13.2'):  # JetPack 7 (CUDA 13.1)
             PYTORCH_VERSION = Version('2.12')
-        elif CUDA_VERSION >= Version('12.9'):   # JetPack 6.2 (CUDA 12.6)
-            PYTORCH_VERSION = Version('2.11')
+        elif CUDA_VERSION >= Version('12.9'):
+            # jp6/cu129 currently publishes cp312 wheels through torch 2.8.0.
+            if PYTHON_VERSION >= Version('3.12'):
+                PYTORCH_VERSION = Version('2.8')
+            else:
+                PYTORCH_VERSION = Version('2.9.1')
         elif CUDA_VERSION >= Version('12.8'):   # JetPack 6.2 (CUDA 12.6)
             PYTORCH_VERSION = Version('2.11')
         elif CUDA_VERSION == Version('12.6'):   # JetPack 6.2 (CUDA 12.6)
